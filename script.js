@@ -20,13 +20,36 @@
   const updateVideoButton = (video, button) => { const playing=!video.paused; button.setAttribute('aria-pressed',String(playing)); button.setAttribute('aria-label',playing?'Pausar vídeo':'Reproduzir vídeo'); const use=button.querySelector('use'); if(use) use.setAttribute('href',playing?'#i-pause':'#i-play'); };
   document.querySelectorAll('[data-toggle-video]').forEach(button => { const video=document.getElementById(button.dataset.toggleVideo); button.addEventListener('click',async()=>{ lazyVideo(video); if(video.paused){try{await video.play();}catch(e){}}else video.pause(); updateVideoButton(video,button); }); video.addEventListener('play',()=>updateVideoButton(video,button)); video.addEventListener('pause',()=>updateVideoButton(video,button)); });
   const heroVideo=document.getElementById('hero-video'); const reel=document.getElementById('instagram-video');
-  const videoObserver=new IntersectionObserver(entries => entries.forEach(async e => { const v=e.target; if(e.isIntersecting){lazyVideo(v); if(!reduced){try{await v.play();}catch(err){}}} else v.pause(); }),{rootMargin:'160px',threshold:.25});
-  videoObserver.observe(heroVideo); videoObserver.observe(reel);
-  const audio=document.getElementById('reel-audio');
-  audio.addEventListener('click',async()=>{ lazyVideo(reel); reel.muted=!reel.muted; audio.setAttribute('aria-pressed',String(!reel.muted)); audio.setAttribute('aria-label',reel.muted?'Ativar som do vídeo':'Desativar som do vídeo'); audio.querySelector('use').setAttribute('href',reel.muted?'#i-muted':'#i-volume'); if(reel.paused){try{await reel.play();}catch(e){}} });
+  if(heroVideo){
+    lazyVideo(heroVideo); heroVideo.muted=true; heroVideo.defaultMuted=true; heroVideo.play().catch(()=>{});
+    const heroObserver=new IntersectionObserver(([entry])=>{ if(entry.isIntersecting) heroVideo.play().catch(()=>{}); else heroVideo.pause(); },{rootMargin:'120px',threshold:.15});
+    heroObserver.observe(heroVideo);
+  }
+
+  let reelVisible=false, reelAudioUnlocked=false;
+  const stopReel=()=>{ if(!reel)return; reel.pause(); reel.muted=true; };
+  const playReel=async()=>{
+    if(!reel || !reelVisible || document.visibilityState!=='visible')return;
+    reel.volume=1; reel.muted=false;
+    try{ await reel.play(); }
+    catch(err){
+      reel.muted=true;
+      try{ await reel.play(); }catch(ignore){}
+      if(reelAudioUnlocked&&reelVisible){ reel.muted=false; reel.play().catch(()=>{ reel.muted=true; }); }
+    }
+  };
+  const unlockReelAudio=()=>{ reelAudioUnlocked=true; if(!reelVisible || !reel)return; reel.muted=false; reel.volume=1; reel.play().catch(()=>{ reel.muted=true; }); };
+  document.addEventListener('pointerdown',unlockReelAudio,{passive:true});
+  document.addEventListener('keydown',unlockReelAudio);
+  if(reel){
+    reel.muted=true; reel.defaultMuted=true;
+    const reelObserver=new IntersectionObserver(([entry])=>{ reelVisible=entry.isIntersecting&&entry.intersectionRatio>=.35; if(reelVisible)playReel(); else stopReel(); },{threshold:[0,.35,.7]});
+    reelObserver.observe(reel);
+    document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden')stopReel(); else playReel(); });
+  }
 
   const projects=document.getElementById('projects-grid');
-  projects.innerHTML=content.projects.map((p,i)=>`<article class="project reveal"><button class="project-photo" data-gallery="${p.gallery}" aria-label="Abrir galeria: ${p.title}"><img src="${p.image}" alt="${p.description}" width="1000" height="800" loading="lazy"><span class="project-category">${p.category}</span><span class="project-open">${icon('i-arrow')}</span></button><div class="project-description"><h3>${p.title}</h3><span>${String(i+1).padStart(2,'0')}</span></div><p>${p.description}</p></article>`).join('');
+  projects.innerHTML=content.projects.map((p,i)=>`<article class="project reveal"><button class="project-photo" data-gallery="${p.gallery}" aria-label="Abrir galeria: ${p.title}"><img src="${p.image}" alt="${p.description}" width="1000" height="800" loading="lazy"><span class="project-category">${p.category}</span><span class="project-open">${icon('i-arrow')}</span></button><div class="project-description"><h3>${p.title}</h3><span>${String(i+1).padStart(2,'0')}</span></div></article>`).join('');
 
   const comparisonSection=document.getElementById('antes-depois');
   if(content.comparison){ const c=content.comparison; comparisonSection.hidden=false; document.getElementById('comparison-mount').innerHTML=`<div class="comparison-pair"><figure><img src="${c.before}" alt="${c.beforeAlt}" loading="lazy"><figcaption>Antes</figcaption></figure><figure><img src="${c.after}" alt="${c.afterAlt}" loading="lazy"><figcaption>Depois</figcaption></figure></div><div class="comparison-story"><div><h3>${c.title}</h3><p>${c.description}</p></div><a class="text-link" href="${content.whatsapp}" target="_blank" rel="noopener noreferrer">Quero transformar ${icon('i-arrow')}</a></div>`; }

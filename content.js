@@ -38,7 +38,7 @@ window.MTG_CONTENT = {
     before:"/assets/pipoca-antes.webp", after:"/assets/pipoca-depois.webp",
     beforeAlt:"Carrinho de pipoca metálico antes do envelopamento",
     afterAlt:"O mesmo carrinho verde depois do envelopamento",
-    title:"Carrinho Pipoca Gourmet", description:"Do metal aparente a uma identidade verde completa. Fotografias reais do mesmo projeto em ângulos diferentes."
+    title:"Carrinho Pipoca Gourmet", description:"O mesmo carrinho, antes e depois do envelopamento."
   },
   testimonials: []
 };
