@@ -23,34 +23,64 @@
   const lazyVideo = (video) => { if(!video || video.dataset.loaded) return; const source=video.querySelector('source[data-src]'); if(source){source.src=source.dataset.src; video.load();} video.dataset.loaded='true'; };
   const updateVideoButton = (video, button) => { const playing=!video.paused; button.setAttribute('aria-pressed',String(playing)); button.setAttribute('aria-label',playing?'Pausar vídeo':'Reproduzir vídeo'); const use=button.querySelector('use'); if(use) use.setAttribute('href',playing?'#i-pause':'#i-play'); };
   document.querySelectorAll('[data-toggle-video]').forEach(button => { const video=document.getElementById(button.dataset.toggleVideo); button.addEventListener('click',async()=>{ lazyVideo(video); if(video.paused){try{await video.play();}catch(e){}}else video.pause(); updateVideoButton(video,button); }); video.addEventListener('play',()=>updateVideoButton(video,button)); video.addEventListener('pause',()=>updateVideoButton(video,button)); });
-  const heroVideo=document.getElementById('hero-video'); const reel=document.getElementById('instagram-video');
-  if(heroVideo){
-    lazyVideo(heroVideo); heroVideo.muted=true; heroVideo.defaultMuted=true; heroVideo.play().catch(()=>{});
-    const heroObserver=new IntersectionObserver(([entry])=>{ if(entry.isIntersecting) heroVideo.play().catch(()=>{}); else heroVideo.pause(); },{rootMargin:'120px',threshold:.15});
-    heroObserver.observe(heroVideo);
-  }
-
-  let reelVisible=false, reelAudioUnlocked=false;
-  const stopReel=()=>{ if(!reel)return; reel.pause(); reel.muted=true; };
-  const playReel=async()=>{
-    if(!reel || !reelVisible || document.visibilityState!=='visible')return;
-    reel.volume=1; reel.muted=false;
-    try{ await reel.play(); }
-    catch(err){
-      reel.muted=true;
-      try{ await reel.play(); }catch(ignore){}
-      if(reelAudioUnlocked&&reelVisible){ reel.muted=false; reel.play().catch(()=>{ reel.muted=true; }); }
-    }
+  // One playback policy for all inline videos. Audio is only enabled by a direct tap.
+  const inlineVideos=[...document.querySelectorAll('#hero-video,#instagram-video,.fleet-inline-video')];
+  const playback=new Map();
+  const isOnscreen=video=>{
+    const box=video.getBoundingClientRect();
+    return box.width>0&&box.height>0&&box.bottom>0&&box.top<innerHeight&&box.right>0&&box.left<innerWidth;
   };
-  const unlockReelAudio=()=>{ reelAudioUnlocked=true; if(!reelVisible || !reel)return; reel.muted=false; reel.volume=1; reel.play().catch(()=>{ reel.muted=true; }); };
-  document.addEventListener('pointerdown',unlockReelAudio,{passive:true});
-  document.addEventListener('keydown',unlockReelAudio);
+  const canAutoplay=video=>document.visibilityState==='visible'&&isOnscreen(video)&&!document.getElementById('fleet-video-dialog')?.open;
+  const playInline=video=>{
+    const state=playback.get(video);
+    if(!state||!canAutoplay(video)||state.pending||!video.paused)return;
+    video.muted=!state.audio;
+    lazyVideo(video);
+    state.pending=true;
+    video.play().then(()=>{
+      if(!canAutoplay(video)){video.pause();video.muted=true;state.audio=false;}
+      if(state.retry)state.retry.hidden=true;
+    }).catch(error=>{
+      if(error.name==='NotAllowedError'&&state.retry)state.retry.hidden=false;
+    }).finally(()=>{state.pending=false;});
+  };
+  const syncInline=()=>inlineVideos.forEach(video=>{
+    if(canAutoplay(video))playInline(video);
+    else{video.pause();video.muted=true;playback.get(video).audio=false;}
+  });
+  inlineVideos.forEach(video=>{
+    video.muted=true;video.defaultMuted=true;video.autoplay=true;video.loop=true;video.playsInline=true;
+    video.setAttribute('muted','');video.setAttribute('playsinline','');video.setAttribute('webkit-playsinline','');
+    video.controls=false;
+    const state={pending:false,audio:false,retry:null};
+    playback.set(video,state);
+    if(video.id){
+      const retry=document.createElement('button');
+      retry.type='button';retry.className='autoplay-retry';retry.hidden=true;
+      retry.setAttribute('aria-label','Reproduzir vídeo');retry.innerHTML=icon('i-play');
+      retry.addEventListener('click',()=>playInline(video));
+      (video.id==='hero-video'?heroSection:video.parentElement).append(retry);
+      state.retry=retry;
+    }
+    ['loadeddata','canplay'].forEach(event=>video.addEventListener(event,()=>playInline(video)));
+    video.addEventListener('playing',()=>{if(state.retry)state.retry.hidden=true;});
+    video.addEventListener('ended',()=>{video.currentTime=0;playInline(video);});
+  });
+  const inlineObserver=new IntersectionObserver(syncInline,{threshold:[0,.01,.15,.35]});
+  inlineVideos.forEach(video=>inlineObserver.observe(video));
+  document.addEventListener('visibilitychange',syncInline);
+  addEventListener('pageshow',syncInline);
+  addEventListener('online',syncInline);
+  // Retry in the user's gesture when a mobile browser refuses autoplay.
+  ['pointerdown','touchend','keydown'].forEach(event=>document.addEventListener(event,syncInline,{passive:true}));
+  const reel=document.getElementById('instagram-video');
   if(reel){
-    reel.muted=true; reel.defaultMuted=true;
-    const reelObserver=new IntersectionObserver(([entry])=>{ reelVisible=entry.isIntersecting&&entry.intersectionRatio>=.35; if(reelVisible)playReel(); else stopReel(); },{threshold:[0,.35,.7]});
-    reelObserver.observe(reel);
-    document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden')stopReel(); else playReel(); });
+    reel.setAttribute('tabindex','0');
+    const toggleReelAudio=()=>{const state=playback.get(reel);state.audio=!state.audio;reel.muted=!state.audio;playInline(reel);};
+    reel.addEventListener('click',toggleReelAudio);
+    reel.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleReelAudio();}});
   }
+  syncInline();
 
   const projects=document.getElementById('projects-grid');
   projects.innerHTML=content.projects.map(p=>`<article class="project reveal"><button class="project-photo" data-gallery="${p.gallery}" aria-label="Abrir galeria: ${p.title}"><img src="${p.image}" alt="${p.description}" width="1000" height="800" loading="lazy" style="object-position:${p.focus||'center'}"><span class="project-category">${p.category}</span><span class="project-open">${icon('i-arrow')}</span></button><div class="project-description"><h3>${p.title}</h3></div></article>`).join('');
@@ -76,13 +106,9 @@
   const fleetModalVideo=document.getElementById('fleet-modal-video');
   const fleetDialogClose=document.querySelector('.fleet-video-dialog-close');
   let fleetOpener=null;
-  const playInlineFleetVideo=(video)=>{ if(!video || fleetDialog.open || document.visibilityState!=='visible' || video.dataset.inView!=='true')return; lazyVideo(video); video.muted=true; video.defaultMuted=true; video.play().catch(()=>{}); };
-  const fleetObserver=new IntersectionObserver(entries=>entries.forEach(entry=>{ const video=entry.target; video.dataset.inView=String(entry.isIntersecting&&entry.intersectionRatio>=.12); if(video.dataset.inView==='true')playInlineFleetVideo(video); else video.pause(); }),{rootMargin:'180px 0px',threshold:[0,.12,.4]});
-  fleetVideos.forEach(video=>{ video.muted=true; video.defaultMuted=true; fleetObserver.observe(video); });
   fleetCards.forEach(card=>card.addEventListener('click',()=>{
     const inlineVideo=card.querySelector('.fleet-inline-video');
     fleetOpener=card;
-    fleetVideos.forEach(video=>video.pause());
     fleetDialogTitle.textContent=card.dataset.fleetTitle||'Projeto de frota';
     fleetModalVideo.src=card.dataset.fleetVideo;
     fleetModalVideo.poster=inlineVideo.poster;
@@ -90,6 +116,7 @@
     fleetModalVideo.volume=1;
     try{fleetModalVideo.currentTime=inlineVideo.currentTime||0;}catch(ignore){}
     fleetDialog.showModal();
+    syncInline();
     document.body.classList.add('modal-open');
     fleetModalVideo.play().catch(()=>{});
   }));
@@ -101,10 +128,9 @@
     fleetModalVideo.removeAttribute('src');
     fleetModalVideo.load();
     document.body.classList.remove('modal-open');
-    fleetVideos.forEach(playInlineFleetVideo);
+    syncInline();
     fleetOpener?.focus();
   });
-  document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden')fleetVideos.forEach(video=>video.pause()); else fleetVideos.forEach(playInlineFleetVideo); });
 
   if(!reduced){ document.documentElement.classList.add('motion-ready'); const observer=new IntersectionObserver(entries=>entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');observer.unobserve(e.target);}}),{threshold:.08,rootMargin:'0px 0px -40px'}); document.querySelectorAll('.reveal').forEach(el=>observer.observe(el)); }
 })();
